@@ -1,0 +1,27 @@
+# Python environments and caches
+.venv/
+venv/
+sft/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local model checkpoints and training artifacts.
+# Obtain Qwen3-0.6B-Base separately and place it in models/.
+models/*
+!models/.gitkeep
+*.safetensors
+*.bin
+*.pt
+*.pth
+checkpoints/
+runs/
+wandb/
+
+# OS files
+.DS_Store

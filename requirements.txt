@@ -1,0 +1,4 @@
+torch>=2.2
+transformers>=4.51
+jupyter>=1.0
+ipykernel>=6.0
