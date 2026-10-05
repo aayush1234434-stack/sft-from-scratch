@@ -109,7 +109,7 @@ models/Qwen3-0.6B-Base/tokenizer.json
 
 Run the notebook from the first cell downward. It expects the working directory to be the repository root or `notebooks/`. Training uses CUDA if it is available, otherwise Apple MPS, otherwise CPU. The save cell writes `models/Qwen3-0.6B-SFT` and replaces that folder if it already exists.
 
-The training loader shuffles with seed 0, so the batch order stays fixed. The numbers quoted below come from one seeded run. Another device can still print different decimals. To follow the device used for those numbers, uncomment `device = torch.device("cpu")` in the model-loading cell only if that run was on CPU.
+The training loader shuffles with seed 0, so the batch order stays fixed. The notebook prints the losses and generations for that seeded run. Another device can still change the decimals.
 
 ## Dataset format
 
@@ -119,12 +119,12 @@ Both JSON files are lists of records:
 [
   {
     "question": "What is 2 + 3?",
-    "answer": "Answer: 5"
+    "answer": "ANSWER=5"
   }
 ]
 ```
 
-The training file has 40 rows. The held-out file has 20 rows. No held-out operand pair appears in training. Held-out rows are never passed to the optimizer. The target string includes the prefix `Answer:`, so the supervised behaviour is both the sum and that format.
+The training file has 40 rows. The held-out file has 20 rows. No held-out operand pair appears in training. Held-out rows are never passed to the optimizer. The target string is `ANSWER=<number>`. That exact spelling is the supervised behaviour, together with the sum.
 
 The prompt built for every row is:
 
@@ -132,17 +132,17 @@ The prompt built for every row is:
 Question: What is 2 + 3?
 ```
 
-The supervised continuation is `Answer: 5` plus the tokenizer's end-of-sequence token.
+The supervised continuation is `ANSWER=5` plus the tokenizer's end-of-sequence token. `ANSWER=` is an awkward spelling on purpose. A normal `Answer:` line is something the base model may already produce, so exact match on that line would not show whether the update did anything.
 
 This is one task in prompt-completion form. The question is the whole prompt. There is no separate instruction field, and the file is not a multi-task instruction mixture.
 
 ### One training row, after tokenization
 
-The first row of `data/train.json` is `What is 0 + 0?` with target `Answer: 0`. The notebook turns it into this string:
+The first row of `data/train.json` is `What is 0 + 0?` with target `ANSWER=0`. The notebook turns it into this string:
 
 ```text
 Question: What is 0 + 0?
-Answer: 0<|endoftext|>
+ANSWER=0<|endoftext|>
 ```
 
 The Qwen3-0.6B-Base tokenizer, with `add_special_tokens=False`, splits that string as follows. A leading `Ġ` is a space. The `Ċ` inside `?Ċ` is the newline at the end of the question. `<|endoftext|>` is the end token, id `151643`.
@@ -159,15 +159,15 @@ The Qwen3-0.6B-Base tokenizer, with `add_special_tokens=False`, splits that stri
 | 7 | Ġ | 220 | 1 | -100 |
 | 8 | 0 | 15 | 1 | -100 |
 | 9 | ?Ċ | 5267 | 1 | -100 |
-| 10 | Answer | 16141 | 1 | 16141 |
-| 11 | : | 25 | 1 | 25 |
-| 12 | Ġ | 220 | 1 | 220 |
+| 10 | ANS | 11692 | 1 | 11692 |
+| 11 | WER | 39351 | 1 | 39351 |
+| 12 | = | 28 | 1 | 28 |
 | 13 | 0 | 15 | 1 | 15 |
 | 14 | `<|endoftext|>` | 151643 | 1 | 151643 |
 
-The first 10 positions are the question. They stay in `input_ids` so the model can read them, and their labels are `-100`, so they do not enter the loss. The last 5 positions are the answer and the end token. Their labels are the token ids themselves. This row has no padding. Padding is added later, only so shorter rows can sit in the same tensor.
+The first 10 positions are the question. They stay in `input_ids` so the model can read them, and their labels are `-100`, so they do not enter the loss. The last 5 positions are the answer and the end token. Their labels are the token ids themselves. `ANSWER` is two tokens, `ANS` and `WER`. This row has no padding. Padding is added later, only so shorter rows can sit in the same tensor.
 
-Hugging Face compares the logit at each position with the label at the next position. The logit on the last question token, `?Ċ`, is scored against the first answer label, `Answer`. The question stays in the forward pass as context. `-100` only removes the question's own next-token terms from the loss.
+Hugging Face compares the logit at each position with the label at the next position. The logit on the last question token, `?Ċ`, is scored against the first answer label, `ANS`. The question stays in the forward pass as context. `-100` only removes the question's own next-token terms from the loss.
 
 The same row with no mask trains a different thing. Every label is now the token id itself:
 
@@ -183,9 +183,9 @@ The same row with no mask trains a different thing. Every label is now the token
 | 7 | Ġ | 220 | 1 | 220 |
 | 8 | 0 | 15 | 1 | 15 |
 | 9 | ?Ċ | 5267 | 1 | 5267 |
-| 10 | Answer | 16141 | 1 | 16141 |
-| 11 | : | 25 | 1 | 25 |
-| 12 | Ġ | 220 | 1 | 220 |
+| 10 | ANS | 11692 | 1 | 11692 |
+| 11 | WER | 39351 | 1 | 39351 |
+| 12 | = | 28 | 1 | 28 |
 | 13 | 0 | 15 | 1 | 15 |
 | 14 | `<|endoftext|>` | 151643 | 1 | 151643 |
 
@@ -193,13 +193,13 @@ That version asks the model to reproduce the question as well as the answer. The
 
 ### Use your own file
 
-Keep the same two fields, `question` and `answer`, and the same list shape. Put training rows in `data/train.json` and rows that must not update the weights in `data/heldout.json`. The notebook always builds the prompt as `Question: ` plus the question plus a newline, and it always appends the end token to `answer`. If your target should not start with the words `Answer: `, change the text in the JSON. The mask follows that split. It does not look for the word `Answer`.
+Keep the same two fields, `question` and `answer`, and the same list shape. Put training rows in `data/train.json` and rows that must not update the weights in `data/heldout.json`. The notebook always builds the prompt as `Question: ` plus the question plus a newline, and it always appends the end token to `answer`. If your target should not be spelled `ANSWER=`, change the text in the JSON. The mask follows the split between the question string and the answer string. It does not look for the letters `ANSWER`.
 
 If your records use different field names, change `make_example` in the notebook. Leave held-out rows out of the training file.
 
 ## Implementation walkthrough
 
-The notebook is the full implementation. The update rule matches the run that produced the results below: the same prompt, the same `-100` mask, global padding, batch size 4, AdamW at `5e-5`, and five epochs. Paths are relative to the repository. Training and held-out rows share one `make_example` function. The model is moved to a selected device. Both generation checks use `max_new_tokens=32`, which is what the recorded side-by-side comparison used.
+The notebook is the full implementation. The update uses the prompt below, the `-100` mask, global padding, batch size 4, AdamW at `5e-5`, and five epochs. Paths are relative to the repository. Training and held-out rows share one `make_example` function. The model is moved to a selected device. Both generation checks use `max_new_tokens=32`.
 
 **Tokenization.** The question and the answer are encoded separately with `add_special_tokens=False`, then concatenated. Encoding them as one string and slicing at a character boundary can merge tokens across the cut.
 
@@ -211,11 +211,11 @@ The notebook is the full implementation. The update rule matches the run that pr
 
 **Forward pass.** `AutoModelForCausalLM` reads `input_ids` and `attention_mask`. Passing `labels` makes it return the masked next-token loss on `outputs.loss`.
 
-**Loss.** The loss is the mean negative log probability of the supervised tokens in the batch, after the library's internal shift. The epoch printout is the unweighted mean of those batch losses.
+**Loss.** Inside a batch, the loss is the mean negative log probability of the supervised tokens, after the library's internal shift. The epoch printout then averages those batch means, one number per batch. A batch whose answers contain more tokens does not get a larger share of that epoch average.
 
 **Backpropagation.** `loss.backward()` writes a gradient for each trainable parameter. It does not itself change the weights.
 
-**AdamW update.** `optimizer.zero_grad()` clears the previous batch's gradients, and `optimizer.step()` applies AdamW at learning rate `5e-5`. Every pretrained parameter is trainable. `5e-5` and five epochs are the settings of this toy run, not a general recipe.
+**AdamW update.** `optimizer.zero_grad()` clears the previous batch's gradients, and `optimizer.step()` applies AdamW at learning rate `5e-5`. Every pretrained parameter is trainable, in float32. The checkpoint file is bfloat16. Training stays in float32 because a step of size `5e-5` is small enough to round away in bfloat16, which keeps about three decimal digits. `5e-5` and five epochs are the settings of this toy run, not a general recipe.
 
 **Evaluation.** Held-out loss reuses the same masking and runs under `model.eval()` and `torch.no_grad()`. No optimizer step runs there. Generation then feeds only the question prompt and decodes greedily with `max_new_tokens=32`.
 
@@ -223,32 +223,16 @@ The notebook is the full implementation. The update rule matches the run that pr
 
 ## Results
 
-These numbers are from the earlier CPU run of this loop, before shuffle was pinned to seed 0. They are not a general claim about SFT. A new run uses seed 0, so the batch order is fixed. On another device the decimals can still change.
-
-Settings for that earlier run: `Qwen3-0.6B-Base`, AdamW at `5e-5`, batch size 4, five epochs, model left on CPU, greedy decoding, exact match on the answer string.
-
-| Epoch | Average training loss |
-|---|---|
-| 1 | 1.2441 |
-| 2 | 0.0804 |
-| 3 | 0.0153 |
-| 4 | 0.0034 |
-| 5 | 0.0023 |
-
-Held-out loss after that run was **0.0361**.
-
-On the 20 held-out questions, exact-match accuracy was **100% for the base model (20/20)** and **95% for the fine-tuned model (19/20)**. The only difference was `What is 1 + 18?`: the expected text is `Answer: 19`, the base model produced `Answer: 19`, and the fine-tuned model produced `Answer: 29`.
-
-Training loss fell because the model became better at imitating the 40 training answers under teacher forcing. On this held-out set, the update did not improve exact-match accuracy. The base checkpoint already answered these prompts correctly, and fine-tuning changed one of those answers to a wrong sum.
+Run the notebook for the numbers. It trains in float32 with seed 0 on the `ANSWER=` targets, and it prints the step-0 training loss, the step-0 held-out loss, five base-model generations, the five epoch losses, and the base-versus-fine-tuned comparison. Those prints are the record. They are not a general claim about SFT. Another device can still change the decimals. A wrong held-out string in that printout is a miss on this run. One miss does not identify a cause.
 
 ## Limitations
 
 - Forty training rows and twenty test rows are enough to see the tensors. They are not enough to conclude anything about addition in general.
-- The task is narrow: one prompt template and integer sums the base model already handles.
+- The task is narrow: one prompt template and integer sums written as `ANSWER=<number>`.
 - Exact match treats a format change as a failure even if the number is right, and it treats a wrong number in the right format as a failure. Both are intended here, and both are blunt.
 - Padding is global rather than per batch, and the learning rate stays constant. The shuffle seed is fixed at 0. That fixes the batch order, not the decimals on every device.
 - The recorded comparison is one seeded run. It is not a multi-seed study.
-- Full fine-tuning updates every weight. There is no adapter, gradient checkpointing, or mixed-precision strategy beyond the checkpoint's own dtype.
+- Full fine-tuning updates every weight in float32. There is no adapter or gradient checkpointing. The checkpoint file is bfloat16. Training does not stay in that dtype, because the update is too small for it.
 
 ## Learning outcomes
 
