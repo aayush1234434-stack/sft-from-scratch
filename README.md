@@ -107,7 +107,7 @@ models/Qwen3-0.6B-Base/model.safetensors
 models/Qwen3-0.6B-Base/tokenizer.json
 ```
 
-Run the notebook from the first cell downward. It expects the working directory to be the repository root or `notebooks/`. Training uses CUDA if it is available, otherwise Apple MPS, otherwise CPU. The save cell writes `models/Qwen3-0.6B-SFT` and replaces that folder if it already exists.
+Run the notebook from the first cell downward. It expects the working directory to be the repository root or `notebooks/`. Training uses CUDA if it is available, and CPU otherwise. Float32 AdamW does not fit in the MPS memory limit on an 8GB Mac. The save cell writes `models/Qwen3-0.6B-SFT` and replaces that folder if it already exists.
 
 The training loader shuffles with seed 0, so the batch order stays fixed. The notebook prints the losses and generations for that seeded run. Another device can still change the decimals.
 
@@ -223,7 +223,16 @@ The notebook is the full implementation. The update uses the prompt below, the `
 
 ## Results
 
-Run the notebook for the numbers. It trains in float32 with seed 0 on the `ANSWER=` targets, and it prints the step-0 training loss, the step-0 held-out loss, five base-model generations, the five epoch losses, and the base-versus-fine-tuned comparison. Those prints are the record. They are not a general claim about SFT. Another device can still change the decimals. A wrong held-out string in that printout is a miss on this run. One miss does not identify a cause.
+One CPU run, float32 weights, seed 0, before any update:
+
+| | loss |
+|---|---|
+| Training rows, step 0 | 8.5325 |
+| Held-out rows, step 0 | 8.3523 |
+
+The base model does not emit the supervised spelling. On `What is 0 + 4?` it wrote `Answer: 4`, and the same `Answer:` line on the next four held-out questions, against targets such as `ANSWER=4`. The sum can be right while exact match is still wrong. That is why the step-0 loss is high.
+
+The training cell then prints five epoch losses. Compare those with 8.5325. This model has 596,049,920 parameters, and float32 AdamW keeps two extra tensors per parameter, about 7GB before the operating system. An 8GB Mac swaps through that loop. A machine with about 16GB free can finish it. The epoch prints and the base-versus-fine-tuned table from that run are the record. Another device can still change the decimals. A wrong held-out string is a miss on that run. One miss does not identify a cause.
 
 ## Limitations
 
@@ -231,7 +240,7 @@ Run the notebook for the numbers. It trains in float32 with seed 0 on the `ANSWE
 - The task is narrow: one prompt template and integer sums written as `ANSWER=<number>`.
 - Exact match treats a format change as a failure even if the number is right, and it treats a wrong number in the right format as a failure. Both are intended here, and both are blunt.
 - Padding is global rather than per batch, and the learning rate stays constant. The shuffle seed is fixed at 0. That fixes the batch order, not the decimals on every device.
-- The recorded comparison is one seeded run. It is not a multi-seed study.
+- The step-0 numbers above are one CPU run. They are not a multi-seed study.
 - Full fine-tuning updates every weight in float32. There is no adapter or gradient checkpointing. The checkpoint file is bfloat16. Training does not stay in that dtype, because the update is too small for it.
 
 ## Learning outcomes
