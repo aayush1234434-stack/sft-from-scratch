@@ -1,4 +1,4 @@
-# Toy Supervised Fine-Tuning from Scratch
+# Supervised Fine-Tuning from Scratch
 
 This repository is a minimal educational implementation of supervised fine-tuning (SFT) with PyTorch and Hugging Face Transformers. It trains a local `Qwen3-0.6B-Base` checkpoint on 40 short addition questions, then compares that checkpoint with the untouched base model on 20 held-out questions.
 
